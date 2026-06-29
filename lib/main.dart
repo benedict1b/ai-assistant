@@ -18,12 +18,9 @@ import 'services/knowledge_seeder.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Load environment variables
   await dotenv.load();
   print("✅ API Key loaded: ${dotenv.env['GROQ_API_KEY'] != null}");
   
-  // Initialize database
   try {
     final db = DatabaseService();
     await db.database;
@@ -67,19 +64,16 @@ class _MainScreenState extends State<MainScreen> {
   Timer? _timer;
   final NewsService _newsService = NewsService();
 
-  // Lazy loading: screens are created only when needed
-  final List<Widget Function()> _screenBuilders = [
-    () => const ChatAssistantScreen(),
-    () => const GPAScreen(),
-    () => const HandbookScreen(),
-    () => const NewsScreen(),
-    () => const PlannerScreen(),
-    () => const CampusScreen(),
-    () => const CalendarScreen(),
-    () => const SettingsScreen(),
+  final List<Widget> _screens = [
+    const ChatAssistantScreen(),
+    const GPAScreen(),
+    const HandbookScreen(),
+    const NewsScreen(),
+    const PlannerScreen(),
+    const CampusScreen(),
+    const CalendarScreen(),
+    const SettingsScreen(),
   ];
-
-  List<Widget> _screens = [];
 
   @override
   void initState() {
@@ -87,26 +81,6 @@ class _MainScreenState extends State<MainScreen> {
     _loadSettings();
     _updateUnreadCount();
     _startNotificationTimer();
-    _initializeScreens();
-  }
-
-  void _initializeScreens() {
-    // Only create the first screen initially (lazy loading)
-    _screens = List.generate(_screenBuilders.length, (index) {
-      if (index == 0) {
-        return _screenBuilders[index](); // Load first screen immediately
-      } else {
-        return Container(); // Placeholder for other screens
-      }
-    });
-  }
-
-  void _loadScreen(int index) {
-    if (index < _screens.length && _screens[index] is Container) {
-      setState(() {
-        _screens[index] = _screenBuilders[index]();
-      });
-    }
   }
 
   @override
@@ -193,13 +167,9 @@ class _MainScreenState extends State<MainScreen> {
                 IconButton(
                   icon: const Icon(Icons.notifications_outlined),
                   onPressed: () {
-                    setState(() {
-                      _currentIndex = 3;
-                      _loadScreen(3);
-                    });
+                    setState(() => _currentIndex = 3);
                     Navigator.pop(context);
                   },
-                  tooltip: 'News & Announcements',
                 ),
                 if (_unreadCount > 0)
                   Positioned(
@@ -230,21 +200,14 @@ class _MainScreenState extends State<MainScreen> {
             ),
             IconButton(
               icon: const Icon(Icons.person_outline),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('👤 Profile coming soon!'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
-              },
+              onPressed: () {},
             ),
           ],
         ),
         drawer: _buildDrawer(),
         body: IndexedStack(
           index: _currentIndex,
-          children: _screens.map((screen) => screen).toList(),
+          children: _screens,
         ),
       ),
     );
@@ -371,7 +334,6 @@ class _MainScreenState extends State<MainScreen> {
         Navigator.pop(context);
         setState(() {
           _currentIndex = index;
-          _loadScreen(index);
         });
       },
     );
