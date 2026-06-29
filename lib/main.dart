@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config/app_theme.dart';
@@ -12,8 +13,26 @@ import 'screens/campus_screen.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/news_service.dart';
+import 'services/database_service.dart';
+import 'services/knowledge_seeder.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Load environment variables
+  await dotenv.load();
+  print("✅ API Key loaded: ${dotenv.env['GROQ_API_KEY'] != null}");
+  
+  // Initialize database
+  try {
+    final db = DatabaseService();
+    await db.database;
+    await seedKnowledgeBase();
+    print("✅ Database initialized");
+  } catch (e) {
+    print("❌ Database error: $e");
+  }
+  
   runApp(const MyApp());
 }
 
@@ -26,7 +45,7 @@ class MyApp extends StatelessWidget {
       title: 'NAUB AI',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system, // Follows system setting by default
+      themeMode: ThemeMode.system,
       home: const MainScreen(),
       debugShowCheckedModeBanner: false,
     );
@@ -48,16 +67,19 @@ class _MainScreenState extends State<MainScreen> {
   Timer? _timer;
   final NewsService _newsService = NewsService();
 
-  final List<Widget> _screens = [
-    const ChatAssistantScreen(),
-    const GPAScreen(),
-    const HandbookScreen(),
-    const NewsScreen(),
-    const PlannerScreen(),
-    const CampusScreen(),
-    const CalendarScreen(),
-    const SettingsScreen(),
+  // Lazy loading: screens are created only when needed
+  final List<Widget Function()> _screenBuilders = [
+    () => const ChatAssistantScreen(),
+    () => const GPAScreen(),
+    () => const HandbookScreen(),
+    () => const NewsScreen(),
+    () => const PlannerScreen(),
+    () => const CampusScreen(),
+    () => const CalendarScreen(),
+    () => const SettingsScreen(),
   ];
+
+  List<Widget> _screens = [];
 
   @override
   void initState() {
@@ -65,6 +87,26 @@ class _MainScreenState extends State<MainScreen> {
     _loadSettings();
     _updateUnreadCount();
     _startNotificationTimer();
+    _initializeScreens();
+  }
+
+  void _initializeScreens() {
+    // Only create the first screen initially (lazy loading)
+    _screens = List.generate(_screenBuilders.length, (index) {
+      if (index == 0) {
+        return _screenBuilders[index](); // Load first screen immediately
+      } else {
+        return Container(); // Placeholder for other screens
+      }
+    });
+  }
+
+  void _loadScreen(int index) {
+    if (index < _screens.length && _screens[index] is Container) {
+      setState(() {
+        _screens[index] = _screenBuilders[index]();
+      });
+    }
   }
 
   @override
@@ -81,10 +123,6 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  // =============================================
-  // NOTIFICATION BADGE LOGIC
-  // =============================================
-
   Future<void> _updateUnreadCount() async {
     try {
       final count = await _newsService.getUnreadCount();
@@ -99,19 +137,14 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _startNotificationTimer() {
-    // Check for new news every 30 seconds
     _timer = Timer.periodic(const Duration(seconds: 30), (timer) async {
-      // Only check if notifications are enabled
       final prefs = await SharedPreferences.getInstance();
       final notificationsEnabled = prefs.getBool('notifications') ?? true;
       
       if (notificationsEnabled) {
-        // Fetch new news from blog
         final added = await _newsService.fetchNewsFromBlog();
         if (added > 0) {
-          // New news found! Update the badge
           await _updateUnreadCount();
-          // Show a snackbar notification
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -122,7 +155,6 @@ class _MainScreenState extends State<MainScreen> {
             );
           }
         } else {
-          // Just update the count in case user marked something as read elsewhere
           await _updateUnreadCount();
         }
       }
@@ -131,14 +163,13 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Use dark or light theme based on preference
-    final theme = _isDarkMode ? AppTheme.darkTheme : AppTheme.lightTheme;
+    final isDark = _isDarkMode;
     
     return MaterialApp(
       title: 'NAUB AI',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: _isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         appBar: AppBar(
@@ -157,19 +188,15 @@ class _MainScreenState extends State<MainScreen> {
           ),
           elevation: 2,
           actions: [
-            // =============================================
-            // 🔔 NOTIFICATION ICON WITH BADGE
-            // =============================================
             Stack(
               children: [
                 IconButton(
                   icon: const Icon(Icons.notifications_outlined),
                   onPressed: () {
-                    // Navigate to News screen
                     setState(() {
-                      _currentIndex = 3; // News screen is index 3
+                      _currentIndex = 3;
+                      _loadScreen(3);
                     });
-                    // Close drawer if open
                     Navigator.pop(context);
                   },
                   tooltip: 'News & Announcements',
@@ -204,7 +231,6 @@ class _MainScreenState extends State<MainScreen> {
             IconButton(
               icon: const Icon(Icons.person_outline),
               onPressed: () {
-                // Navigate to profile (coming soon)
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('👤 Profile coming soon!'),
@@ -216,7 +242,10 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
         drawer: _buildDrawer(),
-        body: _screens[_currentIndex],
+        body: IndexedStack(
+          index: _currentIndex,
+          children: _screens.map((screen) => screen).toList(),
+        ),
       ),
     );
   }
@@ -227,7 +256,6 @@ class _MainScreenState extends State<MainScreen> {
         color: _isDarkMode ? AppTheme.darkCardColor : Colors.white,
         child: Column(
           children: [
-            // Header
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(28),
@@ -265,10 +293,7 @@ class _MainScreenState extends State<MainScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 12),
-
-            // Navigation Items
             _buildDrawerItem(Icons.chat_bubble_outline, 'Chat Assistant', 0),
             _buildDrawerItem(Icons.calculate_outlined, 'GPA Calculator', 1),
             _buildDrawerItem(Icons.book_outlined, 'Student Handbook', 2),
@@ -299,10 +324,7 @@ class _MainScreenState extends State<MainScreen> {
             _buildDrawerItem(Icons.calendar_today_outlined, 'Academic Calendar', 6),
             const Divider(),
             _buildDrawerItem(Icons.settings_outlined, 'Settings', 7),
-
             const Spacer(),
-
-            // Status
             Container(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -346,9 +368,10 @@ class _MainScreenState extends State<MainScreen> {
       ),
       trailing: trailing,
       onTap: () {
-        Navigator.pop(context); // Close drawer
+        Navigator.pop(context);
         setState(() {
           _currentIndex = index;
+          _loadScreen(index);
         });
       },
     );
